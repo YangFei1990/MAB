@@ -1,0 +1,259 @@
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Random;
+import org.apache.commons.math3.distribution.NormalDistribution;
+import org.knowm.xchart.QuickChart;
+import org.knowm.xchart.SwingWrapper;
+import org.knowm.xchart.XYChart;
+
+//import org.apache.commons.math.distribution.NormalDistributionImpl;
+public class mainfile {
+	
+	public static void dfs(int[][] AVec, int left, int right, int len, int widget, int N) {
+		if (len <= 0) return;
+		int pos = left, count = 0;
+		while (pos < right) {
+			int start = pos;
+			for (int i = 0; i < len; ++i) {
+				AVec[pos + i][widget*N + count] = 1;
+			}
+			count++;
+			pos += len;
+			dfs(AVec, start, pos, len / N, widget+1, N);
+		}
+	}
+	
+	public static int[] GenerateBVevtor(int[] AVec, int widget, int N) {
+		int wSize = widget*N + widget*N*(widget - 1)*N / 2;
+		int ASize = widget*N;
+		int [] BVec = new int[wSize];
+		for (int i = 0; i < ASize; ++i) {
+			BVec[i] = AVec[i];
+		}
+		int pos = ASize;
+		for (int i = 0; i < widget-1; ++i) {
+			int thisTurn = N * (widget-1-i);
+			int start = (i+1)*N;
+			for (int j = 0; j < N; ++j) {
+				int val =  AVec[i*N + j];
+				for (int k = 0; k < thisTurn; ++k) {
+					BVec[pos++] = AVec[start+k] * val;
+				}
+			}
+		}
+		return BVec;
+	}
+	
+	public static int[] HillClimbing(double[] W, int[] AVec, double[] Rprob, HashMap<List<Integer>, Double> map, int K, int widget, int N) {
+		int wSize = widget*N + widget*N*(widget - 1)*N / 2;
+		Random rand = new Random();
+		int lastIdx = -1;
+		for (int i = 0; i < K; ++i) {
+			int idx = rand.nextInt(widget);
+			while(idx == lastIdx) idx = rand.nextInt(widget);
+			int left = idx*N, right = (idx+1)*N;
+			//find the current select and set to 0
+			for (int j = left; j < right; ++j) {
+				if (AVec[j] == 1) {
+					AVec[j] = 0;
+					break;
+				}
+			}
+			// select the optimal 
+			double maxVal = 0.0; 
+			int pos = left;
+			for (int j = left; j < right; ++j) {
+				AVec[j] = 1;
+				int[] B =  GenerateBVevtor(AVec, widget, N);
+				double sum = 0;
+				for (int k = 0; k < wSize; ++k) {
+					sum += B[k] * W[k];
+				}
+				if (maxVal == 0.0 || sum > maxVal) {
+					maxVal = sum;
+					pos = j;
+				}
+				AVec[j] = 0;
+			}
+			AVec[pos] = 1;
+			lastIdx = idx;
+		}
+		return AVec;
+	}
+	
+	public static void main(String[] args) {
+		// set parameter
+		int widget = 3;
+		int N = 5;
+		int T = 8000, S = 40, K = 200;
+		int layoutSize = (int)Math.pow(N, widget);
+		int wSize = widget*N + widget*N*(widget - 1)*N / 2;
+		int ASize = widget*N;
+		double[] probI = new double[T];
+		int[][] freq = new int[layoutSize][T];
+		double[] myTime = new double[T];
+		//System.out.println(layoutSize);
+		
+		// build A vector
+		int[][] AVec = new int[layoutSize][ASize];
+		double[] Rprob = new double[layoutSize];
+		dfs(AVec, 0, layoutSize, layoutSize/N, 0, N);
+		
+		// build B vector and corresponding probability
+		int[][] BVec = new int[layoutSize][];
+		//Random rand = new Random();
+		HashMap<List<Integer>, Double> map = new HashMap<>();
+		for (int i = 0; i < layoutSize; ++i) {
+			BVec[i] = GenerateBVevtor(AVec[i], widget, N); 
+			if (i == 0) Rprob[i] = 0.75;
+			else {
+				Random rand = new Random();
+			    Rprob[i] = 0.7 * rand.nextDouble();
+			}
+			List<Integer> tmp = new ArrayList<Integer> (wSize);
+			for (int j = 0; j < wSize; ++j) {
+				tmp.add(BVec[i][j]);
+			}
+			map.put(tmp, Rprob[i]);
+		}
+		int I = 0;
+		
+		// prepare for weight generation
+		double[] muVec = new double[wSize];
+		double[] sigVec = new double[wSize];
+		for (int i = 0; i < wSize; ++i) {
+			muVec[i] = 0.0;
+			sigVec[i] = 1.0;
+		} 
+		
+		//start the learning trail
+		for (int t = 0; t < T; ++t) {
+			myTime[t]  = t;
+			double[] W = new double[wSize];
+			double ctmp1 = 0.0, ctmp2 = 0.0;
+			for (int i = 0; i < wSize; ++i) {
+				NormalDistribution normtmp = new NormalDistribution(muVec[i], sigVec[i]);
+				//W[i] = (double)i / (double)wSize;
+				W[i] = normtmp.sample();
+				//W[i] = rand.nextGaussian()*(Math.sqrt(sigVec[i])) + muVec[i];
+				ctmp1 += BVec[I][i] * muVec[i];
+				ctmp2 += BVec[I][i] * sigVec[i];
+			}
+			ctmp2 += 1;
+			//HillClimbing selection
+			boolean hc = false;
+			double maxVal = 0.0;
+			int[] maxB = new int[wSize];		
+			if(!hc) {
+			    int mB = -1;
+				for (int i = 0; i < layoutSize; ++i) {
+					double sum = 0.0;
+					for (int k = 0; k < wSize; ++k) {
+						sum += BVec[i][k] * W[k];
+					}
+					if (maxVal == 0.0 || sum > maxVal) {
+						maxVal = sum;
+						mB = i;
+					}
+				}
+				freq[mB][t] = 1;
+				maxB = BVec[mB];
+			}
+			else {
+				for (int i = 0; i < S; ++i) {
+					Random rand = new Random();
+					int idx = rand.nextInt(layoutSize);
+					int[] layout = HillClimbing(W, AVec[idx], Rprob, map, K, widget, N);
+					int[] B =  GenerateBVevtor(layout, widget, N);
+					double sum = 0.0;
+					for (int k = 0; k < wSize; ++k) {
+						sum += B[k] * W[k];
+					}
+					if (maxVal == 0.0 || sum > maxVal) {
+						maxVal = sum;
+						maxB = B;
+					}
+				}
+			}
+
+			List<Integer> tmp = new ArrayList<Integer> (wSize);
+			for (int k = 0; k < wSize; ++k) {
+				tmp.add(maxB[k]);
+			}
+			double prob = map.get(tmp);
+			/*if (prob == 0.75) {
+				freq[t] = 1;
+			}*/
+			
+			//get reward
+			Random rand = new Random();
+			double x = rand.nextDouble();
+			double reward = 0;
+			if (x <= prob) reward = 1;
+			else reward = -1;
+			
+			//update posterior
+			double tmp1 = 0.0, tmp2 = 0.0;
+			for (int i = 0; i < wSize; ++i) {
+				tmp1 += maxB[i] * muVec[i];
+				tmp2 += maxB[i] * sigVec[i];
+			}
+			tmp1 = reward*tmp1;
+			tmp2 += 1;
+			NormalDistribution norm = new NormalDistribution();
+			probI[t] = norm.cumulativeProbability(ctmp1/ctmp2);
+			double V = norm.density(tmp1/tmp2) / norm.cumulativeProbability(tmp1/tmp2);
+			double Z = V * (V + tmp1/tmp2);
+			for (int i = 0; i < wSize; ++i) {
+				muVec[i] = muVec[i] + reward * maxB[i] * (sigVec[i] / tmp2) * V;
+				sigVec[i] = sigVec[i] * (1 - maxB[i] * (sigVec[i] / tmp2) * Z);
+			}
+		}
+		
+/*		for (int i = 0; i < layoutSize; ++i) {
+			for (int j = 0; j < wSize; ++j) {
+				System.out.print(BVec[i][j]);
+			}
+			System.out.println("\n");
+		}*/
+		 //double[] xData = new double[] { 0.0, 1.0, 2.0 };
+		 //double[] yData = new double[] { 2.0, 1.0, 0.0 };
+		 
+		 // Create Chart
+		 XYChart chart = QuickChart.getChart("probability convergence", "trails", "probability", "curve", myTime, probI);
+		 
+		// Show it
+		new SwingWrapper(chart).displayChart();
+		int interval = 200;
+		double[] inv = new double[T/interval];
+		double[][] freqI = new double[layoutSize][T/interval];
+		for (int i = 0; i < T/interval; i++) {
+			for(int k = 0; k < layoutSize; ++k) {
+				int sum = 0;
+				for (int j = 0; j < interval; ++j) {	
+					sum += freq[k][i*interval + j];
+				}
+				freqI[k][i] = sum;
+			}
+		}
+		for (int i = 0; i < T/interval; ++i) {
+			inv[i] = i;
+		}
+		int maxc = 0;
+		double maxv = 0;
+		for(int i = 0; i < layoutSize; ++i) {
+			if(freqI[i][0] > maxv) {
+				maxc = i;
+				maxv = freqI[i][0];
+			}
+			System.out.println(freqI[i][0]);
+		}
+		System.out.println(Rprob[maxc]);
+		chart = QuickChart.getChart("selection frequency", "trails", "select rate", "curve", inv, freqI[0]);
+		new SwingWrapper(chart).displayChart();
+		System.out.println("\n");
+	}
+	
+
+}
