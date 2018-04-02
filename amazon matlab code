@@ -1,0 +1,99 @@
+%% set parameter
+widget = 8;
+N = 4;
+T = 5000;
+layoutSize = N ^ widget;
+
+%% build A vector
+ASize = widget*N;
+AVec = zeros(widget*N, layoutSize);
+AVec = dfs(AVec, 1, layoutSize, layoutSize/N, 0, N);
+Rprob = zeros(layoutSize,1);
+%% Generate prob map
+for i = 1:1:layoutSize
+    Rprob(i) = rand*0.7;
+end
+I = 1;
+Rprob(I) = 0.75;
+%[M,I] = max(AVec(widget*N+1,:));
+
+probI = zeros(T,1);
+freq = zeros(T,1);
+%% build W vector
+wSize = widget*N + widget*N*(widget - 1)*N / 2;
+muVec = zeros(wSize,1);
+sigVec = ones(wSize,1);
+BVec = zeros(wSize, layoutSize);
+for i = 1:1:layoutSize
+    BVec(1:ASize, i) = AVec(:,i);
+    pos = ASize+1;
+    for j = 1:1:widget-1
+        for k = 1:1:N
+            tmp = AVec((j-1)*N+k,i) * AVec(j*N+1:ASize, i);
+            len = length(tmp);
+            BVec(pos:pos+len-1, i) = tmp;
+            pos = pos+len;
+        end
+    end
+end
+
+%% Start the learning trail
+for t = 1:1:T
+    %% Sample W vector
+    W = zeros(wSize, 1);
+    for j = 1:1:wSize
+        W(j) = normrnd(muVec(j),sigVec(j));
+    end
+    %BVec = AVec;
+    %wSize = widget*N;
+    
+    x1 = ((BVec(1:wSize,I).') * muVec);
+    x2 = 1 + (BVec(1:wSize,I).') * sigVec;
+    probI(t) = normcdf(x1/x2);
+    %% Hill Climbing 
+    %[index] = HillClimbing(BVec, W, layoutSize, widget, N);
+    maxj = 1;
+    maxValue = 0;
+    for j = 1:1:layoutSize
+        value = (BVec(1:wSize,j).') * W;
+        if value > maxValue
+            maxValue = value;
+            maxj = j;
+        end
+    end
+    B = BVec(1:wSize,maxj);
+    prob = Rprob(maxj);
+    if maxj == I
+        freq(t) = 1;
+    end
+    %% Getting Reward
+    x = rand;
+    reward = 1;
+    if x <= prob
+        reward = 1;
+    else 
+        reward = -1;
+    end
+    
+    %% update posterior
+    tmp1 = reward * ((B.') * muVec);
+    tmp2 = 1 + (B.') * sigVec;
+    probI(t) = normcdf(((BVec(1:wSize,I).') * muVec) / tmp2);
+    V = normpdf(tmp1/tmp2) / normcdf(tmp1/tmp2);
+    Z = V * (V + tmp1/tmp2);
+    for j = 1 : 1 : wSize
+        muVec(j) = muVec(j) + reward * B(j) * (sigVec(j) / tmp2) * V;
+        sigVec(j) = sigVec(j) * (1 - B(j) * (sigVec(j) / tmp2) * Z);
+    end
+    
+end
+interval = 200;
+freqI = zeros(T/interval, 1);
+for i = 1:1:T/interval
+    freqI(i) = sum(freq((i-1)*interval + 1 : i*interval));
+end
+figure(1)
+plot(probI);
+figure(2)
+plot(freqI);
+disp('stop');
